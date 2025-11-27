@@ -32,19 +32,8 @@ async function login() {
     await page.goto(process.env.WEBSITE_URL, { waitUntil: 'networkidle2' });
 
     await page.type('#email', process.env.USERNAME);
-    await page.type('#password', process.env.PASSWORD);
-
-    await page.waitForSelector('.g-recaptcha', { timeout: 10000 });
-
-    const sitekey = await page.evaluate(() => {
-      const el = document.querySelector('.g-recaptcha');
-      return el ? el.dataset.sitekey : null;
-    });
-    if (!sitekey) throw new Error('未找到 sitekey');
-    const currentUrl = page.url();
-
-    await solveTurnstile(page, sitekey, currentUrl);
-
+    await page.type('#password', process.env.PASSWORD)
+    await wait(20000);
     await page.click('button[type="submit"]');
 
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
