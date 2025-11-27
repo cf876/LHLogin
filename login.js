@@ -13,7 +13,6 @@ async function sendTelegramMessage(botToken, chatId, message) {
 }
 
 
-
 async function login() {
   const browser = await puppeteer.launch({
     headless: true,
@@ -32,12 +31,10 @@ async function login() {
     await page.goto(process.env.WEBSITE_URL, { waitUntil: 'networkidle2' });
 
     await page.type('#email', process.env.USERNAME);
-    await page.type('#password', process.env.PASSWORD)
+    await page.type('#password', process.env.PASSWORD);
+
     await page.waitForSelector('.g-recaptcha', { timeout: 10000 });
 
-    const sitekey = await page.evaluate(() => {
-      const el = document.querySelector('.g-recaptcha');
-      
     await page.click('button[type="submit"]');
 
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
