@@ -33,7 +33,11 @@ async function login() {
 
     await page.type('#email', process.env.USERNAME);
     await page.type('#password', process.env.PASSWORD)
-    await wait(20000);
+    await page.waitForSelector('.g-recaptcha', { timeout: 10000 });
+
+    const sitekey = await page.evaluate(() => {
+      const el = document.querySelector('.g-recaptcha');
+      
     await page.click('button[type="submit"]');
 
     await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
