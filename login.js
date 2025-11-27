@@ -12,53 +12,7 @@ async function sendTelegramMessage(botToken, chatId, message) {
   });
 }
 
-async function solveTurnstile(page, sitekey, pageUrl) {
-  const apiKey = process.env.CAPTCHA_API_KEY;
-  if (!apiKey) throw new Error('CAPTCHA_API_KEY 未设置');
 
-  const submitTaskRes = await axios.post('http://2captcha.com/in.php', {
-    key: apiKey,
-    method: 'turnstile',
-    sitekey: sitekey,
-    pageurl: pageUrl,
-    json: 1
-  });
-
-  if (submitTaskRes.data.status !== 1) {
-    throw new Error(`提交任务失败: ${submitTaskRes.data.request}`);
-  }
-
-  const taskId = submitTaskRes.data.request;
-
-  let result;
-  for (let i = 0; i < 24; i++) {
-    await page.waitForTimeout(5000);
-    const getResultRes = await axios.get(`http://2captcha.com/res.php?key=${apiKey}&action=get&id=${taskId}&json=1`);
-    if (getResultRes.data.status === 1) {
-      result = getResultRes.data.request;
-      break;
-    }
-    if (getResultRes.data.request === 'CAPCHA_NOT_READY') {
-      continue;
-    }
-    throw new Error(`获取结果失败: ${getResultRes.data.request}`);
-  }
-
-  if (!result) throw new Error('Turnstile 解决超时');
-
-  await page.evaluate((token) => {
-    const textarea = document.querySelector('textarea[name="cf-turnstile-response"]');
-    if (textarea) {
-      textarea.value = token;
-    } else {
-      if (window.turnstileCallback) {
-        window.turnstileCallback({ token });
-      }
-    }
-  }, result);
-
-  console.log('Turnstile 已解决');
-}
 
 async function login() {
   const browser = await puppeteer.launch({
