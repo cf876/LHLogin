@@ -37,7 +37,7 @@ async function login() {
 
     await page.click('button[type="submit"]');
 
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
 
     const currentUrlAfter = page.url();
     const title = await page.title();
