@@ -28,7 +28,7 @@ async function login() {
   await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
   try {
-    await page.goto(process.env.WEBSITE_URL, { waitUntil: 'networkidle2' });
+    await page.goto(process.env.WEBSITE_URL, { waitUntil: 'networkidle2', timeout: 10000 });
 
     await page.type('#email', process.env.USERNAME);
     await page.type('#password', process.env.PASSWORD);
@@ -37,7 +37,7 @@ async function login() {
 
     await page.click('button[type="submit"]');
 
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 });
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 });
 
     const currentUrlAfter = page.url();
     const title = await page.title();
