@@ -28,35 +28,38 @@ async function login() {
   try {
     await page.goto(process.env.WEBSITE_URL, { waitUntil: 'networkidle2' });
     
-    // 等待初始验证页面加载
+    // 等待Cloudflare验证页面加载
     await randomDelay(3000, 5000);
     
-    // 点击固定位置的验证窗口（根据经验设置的坐标）
-    console.log('点击验证窗口进行初始验证...');
-    // 使用page.mouse模拟真实点击
-    await page.mouse.move(400, 300); // 移动到验证按钮位置（X:400, Y:300，可根据实际情况调整）
-    await randomDelay(300, 500);
-    await page.mouse.down();
-    await randomDelay(100, 200);
-    await page.mouse.up();
-    console.log('已点击验证窗口，等待验证完成...');
+    // 定位并点击“Verify you are human”复选框（根据页面元素）
+    console.log('开始Cloudflare人机验证...');
+    try {
+      // 精准定位验证复选框（匹配页面上的元素）
+      const verifyCheckbox = await page.waitForSelector('input[type="checkbox"][name="cf-turnstile-response"]', { timeout: 10000 });
+      if (verifyCheckbox) {
+        await page.hover('input[type="checkbox"][name="cf-turnstile-response"]');
+        await randomDelay(500, 800);
+        await page.click('input[type="checkbox"][name="cf-turnstile-response"]', { delay: 200 });
+        console.log('已点击验证复选框，等待验证完成...');
+      } else {
+        // 备用选择器（匹配页面上的“Verify you are human”区域）
+        await page.hover('div:has-text("Verify you are human") input[type="checkbox"]');
+        await randomDelay(500, 800);
+        await page.click('div:has-text("Verify you are human") input[type="checkbox"]', { delay: 200 });
+        console.log('已通过备用选择器点击验证复选框...');
+      }
+    } catch (e) {
+      // 极端情况：用坐标点击（根据你提供的页面，复选框在页面左上方区域）
+      console.log('选择器点击失败，尝试坐标点击...');
+      await page.mouse.move(50, 350); // 匹配页面上复选框的位置（左50px，上350px）
+      await randomDelay(300, 500);
+      await page.mouse.down();
+      await randomDelay(100, 200);
+      await page.mouse.up();
+    }
     
     // 等待验证完成和页面跳转
-    await randomDelay(5000, 8000);
-    
-    // 如果需要，也可以尝试点击特定的验证按钮选择器
-    try {
-      // 尝试点击常见的验证按钮选择器
-      await Promise.race([
-        page.click('.verify-btn', { delay: 200 }),
-        page.click('#verify-button', { delay: 200 }),
-        page.click('[data-testid="verify"]', { delay: 200 }),
-        page.click('button:contains("验证")', { delay: 200 }),
-        page.click('iframe[title="Verification"]', { delay: 200 })
-      ]).catch(() => console.log('特定验证按钮未找到，已使用坐标点击'));
-    } catch (e) {
-      console.log('备用验证按钮点击失败，继续执行');
-    }
+    await randomDelay(5000, 10000);
     
     // 等待登录页面加载
     await randomDelay(3000, 5000);
