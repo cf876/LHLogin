@@ -7,7 +7,7 @@ function randomDelay(min = 1000, max = 3000) {
 
 async function login() {
   const browser = await puppeteer.launch({
-    headless: true, // 保持headless模式
+    headless: true,
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
@@ -28,8 +28,41 @@ async function login() {
   try {
     await page.goto(process.env.WEBSITE_URL, { waitUntil: 'networkidle2' });
     
-    // 模拟真人阅读页面的时间
+    // 等待初始验证页面加载
     await randomDelay(3000, 5000);
+    
+    // 点击固定位置的验证窗口（根据经验设置的坐标）
+    console.log('点击验证窗口进行初始验证...');
+    // 使用page.mouse模拟真实点击
+    await page.mouse.move(400, 300); // 移动到验证按钮位置（X:400, Y:300，可根据实际情况调整）
+    await randomDelay(300, 500);
+    await page.mouse.down();
+    await randomDelay(100, 200);
+    await page.mouse.up();
+    console.log('已点击验证窗口，等待验证完成...');
+    
+    // 等待验证完成和页面跳转
+    await randomDelay(5000, 8000);
+    
+    // 如果需要，也可以尝试点击特定的验证按钮选择器
+    try {
+      // 尝试点击常见的验证按钮选择器
+      await Promise.race([
+        page.click('.verify-btn', { delay: 200 }),
+        page.click('#verify-button', { delay: 200 }),
+        page.click('[data-testid="verify"]', { delay: 200 }),
+        page.click('button:contains("验证")', { delay: 200 }),
+        page.click('iframe[title="Verification"]', { delay: 200 })
+      ]).catch(() => console.log('特定验证按钮未找到，已使用坐标点击'));
+    } catch (e) {
+      console.log('备用验证按钮点击失败，继续执行');
+    }
+    
+    // 等待登录页面加载
+    await randomDelay(3000, 5000);
+
+    // 模拟真人阅读页面的时间
+    await randomDelay(2000, 4000);
 
     // 模拟真人移动鼠标到邮箱输入框
     await page.hover('#email');
