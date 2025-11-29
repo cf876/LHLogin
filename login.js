@@ -7,12 +7,14 @@ function randomDelay(min = 1000, max = 3000) {
 
 async function login() {
   const browser = await puppeteer.launch({
-    headless: false, // 改为false以便人工操作验证码
+    headless: true, // 保持headless模式
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--disable-gpu'
+      '--disable-gpu',
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins,site-per-process'
     ]
   });
   const page = await browser.newPage();
@@ -55,20 +57,51 @@ async function login() {
     
     await randomDelay(2000, 3000);
 
-    // 等待验证码人工处理（60秒超时）
-    console.log('请在60秒内完成验证码验证并点击登录按钮...');
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }).catch(() => {
-      console.log('验证码等待超时，继续执行...');
-    });
+    // 等待验证码处理（30秒等待时间）
+    console.log('等待验证码区域加载并准备跳过...');
+    try {
+      await page.waitForSelector('.g-recaptcha, [data-sitekey], iframe[src*="captcha"], iframe[src*="turnstile"]', { timeout: 10000 });
+      console.log('检测到验证码，等待30秒供人工处理或自动跳过...');
+      await randomDelay(30000); // 等待30秒
+    } catch (e) {
+      console.log('未检测到验证码或验证码已加载完成');
+    }
+
+    // 尝试点击提交按钮
+    try {
+      await page.click('button[type="submit"]', { delay: 100 });
+      await randomDelay(2000, 4000);
+    } catch (e) {
+      console.log('提交按钮点击失败或需要验证码验证');
+    }
+
+    // 等待页面导航
+    try {
+      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 });
+    } catch (e) {
+      console.log('页面导航超时，继续检查登录状态');
+    }
 
     // 检查登录状态
     const currentUrlAfter = page.url();
     const title = await page.title();
-    if (currentUrlAfter.includes('/') && !title.includes('Login')) {
+    if (currentUrlAfter.includes('/') && !title.includes('Login') && !title.includes('Sign')) {
       console.log('登录成功！当前页面：', currentUrlAfter);
       console.log('页面标题：', title);
     } else {
-      throw new Error(`登录可能失败。当前 URL: ${currentUrlAfter}, 标题: ${title}`);
+      // 如果登录页面有自动刷新或验证码自动过期机制，这里会继续
+      console.log(`登录流程继续。当前 URL: ${currentUrlAfter}, 标题: ${title}`);
+      // 再等待一段时间让页面完成加载
+      await randomDelay(5000, 8000);
+      
+      // 最终检查
+      const finalUrl = page.url();
+      const finalTitle = await page.title();
+      if (finalUrl.includes('/') && !finalTitle.includes('Login') && !finalTitle.includes('Sign')) {
+        console.log('最终检查：登录成功！当前页面：', finalUrl);
+      } else {
+        throw new Error(`登录可能失败。最终 URL: ${finalUrl}, 标题: ${finalTitle}`);
+      }
     }
 
     console.log('脚本执行完成。');
