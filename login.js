@@ -5,25 +5,19 @@ function randomDelay(min = 1000, max = 3000) {
   return new Promise(resolve => setTimeout(resolve, Math.random() * (max - min) + min));
 }
 
-// 检查页面是否已跳转（验证是否成功）
-async function checkPageNavigation(page, originalUrl) {
+// 检查页面是否仍为验证页面
+async function isVerificationPage(page) {
   const currentUrl = page.url();
   const pageTitle = await page.title();
   
-  // 判断条件：URL变化 或 标题不再是验证页面
-  const isNavigated = currentUrl !== originalUrl && 
-                     !pageTitle.includes('Just a moment') && 
-                     !pageTitle.includes('Challenge') &&
-                     !currentUrl.includes('cdn-cgi/challenge');
-  
-  return {
-    navigated: isNavigated,
-    url: currentUrl,
-    title: pageTitle
-  };
+  // 验证页面特征：URL包含验证路径或标题符合验证页面特征
+  return currentUrl.includes('cdn-cgi/challenge') || 
+         pageTitle.includes('Just a moment') || 
+         pageTitle.includes('Verify you are human') ||
+         (await page.$eval('body', body => body.innerText.includes('Verify you are human'))).catch(() => false);
 }
 
-// 精准定位验证复选框并验证跳转
+// 精准定位验证复选框并点击
 async function clickVerifyCheckbox(page) {
   const originalUrl = page.url();
   console.log('开始验证操作，原始URL:', originalUrl);
@@ -43,7 +37,6 @@ async function clickVerifyCheckbox(page) {
     
     if (cloudflareContainer) {
       // 从截图分析，复选框位于页面中上部，左侧位置
-      // 使用相对定位确保在不同分辨率下都能准确定位
       const containerBounds = await cloudflareContainer.boundingBox();
       if (containerBounds) {
         // 计算复选框相对位置（基于截图中复选框位置）
@@ -64,14 +57,9 @@ async function clickVerifyCheckbox(page) {
         await page.mouse.up({ button: 'left' });
         console.log('已点击复选框，等待响应...');
         
-        // 等待并检查跳转
+        // 等待验证结果
         await randomDelay(3000, 5000);
-        const navResult = await checkPageNavigation(page, originalUrl);
-        
-        if (navResult.navigated) {
-          console.log(`方法1成功！页面已跳转至: ${navResult.url}`);
-          return true;
-        }
+        return true;
       }
     }
   } catch (e) {
@@ -103,12 +91,7 @@ async function clickVerifyCheckbox(page) {
             await page.click(selector, { delay: 150 });
             
             await randomDelay(3000, 4000);
-            const navResult = await checkPageNavigation(page, originalUrl);
-            
-            if (navResult.navigated) {
-              console.log(`方法2成功！页面已跳转至: ${navResult.url}`);
-              return true;
-            }
+            return true;
           }
         }
       } catch (e) {
@@ -144,11 +127,9 @@ async function clickVerifyCheckbox(page) {
         
         // 检查是否跳转
         await randomDelay(1500, 2000);
-        const navResult = await checkPageNavigation(page, originalUrl);
-        
-        if (navResult.navigated) {
-          console.log(`方法3成功！在位置(${x}, ${y})点击后页面跳转至: ${navResult.url}`);
-          return true;
+        const stillVerifying = await isVerificationPage(page);
+        if (!stillVerifying) {
+          return true; // 已跳出验证页面，结束点击
         }
       }
     }
@@ -161,13 +142,13 @@ async function clickVerifyCheckbox(page) {
 
 async function login() {
   const browser = await puppeteer.launch({
-    headless: false, // 调试时使用非无头模式，方便观察
+    headless: "new",  // 无头模式，兼容服务器环境
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-gpu',
-      '--window-size=1200,800' // 使用更接近截图的窗口尺寸
+      '--window-size=1200,800'
     ]
   });
   const page = await browser.newPage();
@@ -186,44 +167,126 @@ async function login() {
       waitUntil: 'networkidle2', 
       timeout: 30000 
     });
-    const initialUrl = page.url();
     
-    // 验证重试循环
-    while (verificationAttempts < maxVerificationAttempts) {
-      verificationAttempts++;
-      console.log(`\n========== 验证尝试 ${verificationAttempts}/${maxVerificationAttempts} ==========`);
-      
-      // 等待页面完全加载
-      await randomDelay(2000, 3000);
-      
-      // 执行验证并检查跳转
-      const verificationSuccess = await clickVerifyCheckbox(page);
-      
-      // 最终检查跳转状态
-      const navResult = await checkPageNavigation(page, initialUrl);
-      
-      if (verificationSuccess || navResult.navigated) {
-        console.log(`\n验证成功！页面已跳转至: ${navResult.url}`);
-        break;
+    // 检查初始页面是否为验证页面
+    let isVerifying = await isVerificationPage(page);
+    if (!isVerifying) {
+      console.log('初始页面不是验证页面，直接进入登录流程');
+    } else {
+      // 验证重试循环：仅当仍在验证页面时才继续尝试
+      while (verificationAttempts < maxVerificationAttempts && isVerifying) {
+        verificationAttempts++;
+        console.log(`\n========== 验证尝试 ${verificationAttempts}/${maxVerificationAttempts} ==========`);
+        
+        // 执行验证点击
+        await clickVerifyCheckbox(page);
+        
+        // 检查是否仍在验证页面
+        isVerifying = await isVerificationPage(page);
+        
+        if (!isVerifying) {
+          console.log(`\n验证尝试 ${verificationAttempts} 成功！已跳出验证页面`);
+          break;
+        }
+        
+        console.log(`验证尝试 ${verificationAttempts} 后仍在验证页面`);
+        
+        // 最后一次尝试失败则报错
+        if (verificationAttempts >= maxVerificationAttempts) {
+          await page.screenshot({ path: 'verification-failure.png', fullPage: true });
+          throw new Error(`验证失败：${maxVerificationAttempts}次尝试均未通过Cloudflare验证`);
+        }
+        
+        // 刷新页面进行下一次尝试
+        console.log('刷新页面准备下一次验证尝试...');
+        await page.reload({ waitUntil: 'networkidle2' });
+        await randomDelay(2000, 3000); // 等待页面重新加载
       }
-      
-      console.log(`验证尝试 ${verificationAttempts} 未成功，当前URL: ${navResult.url}, 标题: ${navResult.title}`);
-      
-      // 最后一次尝试失败则报错
-      if (verificationAttempts >= maxVerificationAttempts) {
-        await page.screenshot({ path: 'verification-failure.png', fullPage: true });
-        throw new Error(`验证失败：3次尝试均未通过Cloudflare验证，最终URL: ${navResult.url}`);
-      }
-      
-      // 刷新页面重试
-      console.log('刷新页面重试验证...');
-      await page.reload({ waitUntil: 'networkidle2' });
     }
     
     // 验证通过后，继续登录流程
     console.log('\n========== 开始登录操作 ==========');
     
-    // 后续登录逻辑保持不变...
+    // 等待登录表单加载
+    try {
+      await page.waitForSelector('#email, [name="email"], #password, [name="password"]', { timeout: 10000 });
+    } catch (e) {
+      console.log('未找到登录表单元素，检查是否已登录...');
+      // 检查当前状态
+      const finalUrl = page.url();
+      const finalTitle = await page.title();
+      console.log(`当前URL: ${finalUrl}`);
+      console.log(`当前标题: ${finalTitle}`);
+      
+      if (!finalTitle.includes('Login') && !finalTitle.includes('Sign') && !finalUrl.includes('/login')) {
+        console.log('✅ 看起来已登录成功！');
+        await browser.close();
+        return;
+      } else {
+        throw new Error('无法找到登录表单，登录失败');
+      }
+    }
+    
+    // 输入账号密码
+    try {
+      // 模拟真人移动鼠标到邮箱输入框
+      await page.hover('#email, [name="email"]');
+      await randomDelay(500, 1000);
+      
+      const emailSelector = (await page.$('#email')) ? '#email' : '[name="email"]';
+      const email = process.env.USERNAME;
+      console.log(`输入邮箱/用户名到 ${emailSelector}`);
+      for (const char of email) {
+        await page.type(emailSelector, char);
+        await randomDelay(100, 300);
+      }
+      
+      await randomDelay(1000, 2000);
+      
+      await page.hover('#password, [name="password"]');
+      await randomDelay(500, 1000);
+      
+      const passwordSelector = (await page.$('#password')) ? '#password' : '[name="password"]';
+      console.log(`输入密码到 ${passwordSelector}`);
+      const password = process.env.PASSWORD;
+      for (const char of password) {
+        await page.type(passwordSelector, char);
+        await randomDelay(100, 300);
+      }
+      
+      await randomDelay(2000, 3000);
+      
+      // 点击提交按钮
+      console.log('点击提交按钮');
+      await page.click('button[type="submit"], input[type="submit"]', { delay: 200 });
+      
+      // 等待并检查跳转
+      await randomDelay(3000, 5000);
+      const afterLoginUrl = page.url();
+      const afterLoginTitle = await page.title();
+      
+      console.log('\n========== 登录结果 ==========');
+      console.log(`登录后URL: ${afterLoginUrl}`);
+      console.log(`登录后标题: ${afterLoginTitle}`);
+      
+      if (afterLoginUrl !== page.url() || !afterLoginTitle.includes('Login') && !afterLoginUrl.includes('/login')) {
+        console.log('✅ 登录成功！页面已跳转');
+      } else {
+        throw new Error('登录后页面未跳转，可能登录失败');
+      }
+      
+    } catch (e) {
+      console.log('登录表单操作失败:', e.message);
+      // 最终状态检查
+      const finalUrl = page.url();
+      const finalTitle = await page.title();
+      
+      if (!finalTitle.includes('Login') && !finalUrl.includes('/login')) {
+        console.log('✅ 看起来已登录成功！');
+      } else {
+        throw e;
+      }
+    }
     
     console.log('\n✅ 脚本执行完成，登录成功！');
     
