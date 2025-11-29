@@ -206,7 +206,8 @@ async function login() {
   } catch (error) {
     const timestamp = new Date().getTime();
     const screenshotPath = path.join(screenshotsDir, `login-failure-${timestamp}.png`);
-    await page.screenshot({ path: screenshotPath, fullPage: true, type: 'png', quality: 90 });
+    // 修复：移除PNG不支持的quality参数
+    await page.screenshot({ path: screenshotPath, fullPage: true, type: 'png' });
     
     const message = `*❌ Login Failed!*\n` +
                    `📅 Time: ${new Date().toLocaleString('en-US', { hour12: false })}\n` +
