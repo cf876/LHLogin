@@ -2,6 +2,7 @@ const puppeteer = require('puppeteer');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
+const archiver = require('archiver');
 
 const randomDelay = (min = 1000, max = 3000) => {
   const safeMin = Math.max(min, 500);
@@ -63,9 +64,31 @@ async function sendTelegramMessage(botToken, chatId, message) {
   }
 }
 
+// 打包文件为ZIP
+async function zipFiles(sourceDir, outputPath) {
+  return new Promise((resolve, reject) => {
+    const output = fs.createWriteStream(outputPath);
+    const archive = archiver('zip', { zlib: { level: 6 } });
+
+    output.on('close', () => resolve(`ZIP created: ${archive.pointer()} bytes`));
+    archive.on('error', err => reject(err));
+
+    archive.pipe(output);
+    archive.directory(sourceDir, false);
+    archive.finalize();
+  });
+}
+
 async function login() {
   const isHeadless = !(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
-  
+  const screenshotsDir = path.join(__dirname, 'screenshots');
+  const zipOutputPath = path.join(__dirname, 'login-failure-screenshots.zip');
+
+  // 确保截图目录存在，清空旧截图和压缩包
+  if (fs.existsSync(screenshotsDir)) fs.rmSync(screenshotsDir, { recursive: true, force: true });
+  if (fs.existsSync(zipOutputPath)) fs.unlinkSync(zipOutputPath);
+  fs.mkdirSync(screenshotsDir, { recursive: true });
+
   const browser = await puppeteer.launch({
     headless: isHeadless ? 'new' : 'new',
     args: [
@@ -87,10 +110,6 @@ async function login() {
   });
 
   const page = await browser.newPage();
-  const screenshotsDir = path.join(__dirname, 'screenshots');
-  if (!fs.existsSync(screenshotsDir)) {
-    fs.mkdirSync(screenshotsDir, { recursive: true });
-  }
 
   try {
     await page.setExtraHTTPHeaders({
@@ -206,13 +225,20 @@ async function login() {
   } catch (error) {
     const timestamp = new Date().getTime();
     const screenshotPath = path.join(screenshotsDir, `login-failure-${timestamp}.png`);
-    // 修复：移除PNG不支持的quality参数
     await page.screenshot({ path: screenshotPath, fullPage: true, type: 'png' });
+    
+    // 打包截图为ZIP
+    try {
+      await zipFiles(screenshotsDir, zipOutputPath);
+      console.log(`Screenshots zipped to: ${zipOutputPath}`);
+    } catch (zipError) {
+      console.error('Failed to zip screenshots:', zipError.message);
+    }
     
     const message = `*❌ Login Failed!*\n` +
                    `📅 Time: ${new Date().toLocaleString('en-US', { hour12: false })}\n` +
                    `⚠️ Error: ${error.message}\n` +
-                   `📸 Screenshot: ${path.basename(screenshotPath)}`;
+                   `📦 Zip File: login-failure-screenshots.zip`;
     await sendTelegramMessage(process.env.TELEGRAM_BOT_TOKEN, process.env.TELEGRAM_CHAT_ID, message);
     
     console.error('Login failed:', error.message);
