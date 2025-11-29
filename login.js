@@ -30,7 +30,7 @@ const generateMousePath = (start, end, steps = 50) => {
 
 const simulateHumanClick = async (page, element) => {
   const boundingBox = await element.boundingBox();
-  if (!boundingBox) throw new Error('目标元素未找到');
+  if (!boundingBox) throw new Error('Target element not found');
 
   const endX = boundingBox.x + boundingBox.width / 2 + Math.random() * 10 - 5;
   const endY = boundingBox.y + boundingBox.height / 2 + Math.random() * 10 - 5;
@@ -59,22 +59,27 @@ async function sendTelegramMessage(botToken, chatId, message) {
       parse_mode: 'Markdown'
     });
   } catch (error) {
-    console.error('Telegram 通知失败:', error.message);
+    console.error('Telegram notification failed:', error.message);
   }
 }
 
 async function login() {
+  const isHeadless = !(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
+  
   const browser = await puppeteer.launch({
-    headless: false,
+    headless: isHeadless ? 'new' : 'new',
     args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-blink-features=AutomationControlled',
       '--window-size=1920,1080',
-      '--lang=zh-CN',
+      '--lang=en-US',
       '--disable-notifications',
-      '--disable-extensions'
+      '--disable-extensions',
+      '--hide-scrollbars',
+      '--mute-audio',
+      '--disable-background-timer-throttling'
     ],
     defaultViewport: { width: 1920, height: 1080 },
     slowMo: 50,
@@ -89,7 +94,7 @@ async function login() {
 
   try {
     await page.setExtraHTTPHeaders({
-      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8,zh-TW;q=0.7',
+      'Accept-Language': 'en-US,en;q=0.9,zh-CN;q=0.8,zh;q=0.7',
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
       'Accept-Encoding': 'gzip, deflate, br',
       'Cache-Control': 'no-cache',
@@ -101,7 +106,7 @@ async function login() {
 
     await page.evaluateOnNewDocument(() => {
       Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-      Object.defineProperty(navigator, 'languages', { get: () => ['zh-CN', 'zh', 'en'] });
+      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en', 'zh-CN'] });
       Object.defineProperty(navigator, 'plugins', { get: () => Array.from({ length: Math.floor(Math.random() * 3 + 1) }) });
       Object.defineProperty(navigator, 'mimeTypes', { get: () => Array.from({ length: Math.floor(Math.random() * 5 + 2) }) });
       window.chrome = {
@@ -147,8 +152,23 @@ async function login() {
     }
     await randomDelay(1500, 3000);
 
-    console.log('请在浏览器中手动完成验证码（如果有），脚本将等待60秒...');
-    await page.waitForSelector('.g-recaptcha', { visible: true, timeout: 60000 });
+    console.log('Waiting for captcha auto-verification (30s timeout, no manual intervention)...');
+    try {
+      await page.waitForFunction(() => {
+        const recaptcha = document.querySelector('.g-recaptcha');
+        if (!recaptcha) return true;
+        
+        const isVerified = 
+          recaptcha.classList.contains('verified') ||
+          document.querySelector('.recaptcha-checkbox-checked') !== null ||
+          document.querySelector('.g-recaptcha-response').value.length > 0;
+        
+        return isVerified;
+      }, { timeout: 30000 });
+      console.log('Captcha verified (or no captcha required)');
+    } catch (captchaError) {
+      throw new Error('Captcha timeout - no manual intervention, login aborted');
+    }
     await randomDelay(2000, 3000);
 
     const submitBtn = await page.waitForSelector('button[type="submit"]', { visible: true, timeout: 15000 });
@@ -167,36 +187,35 @@ async function login() {
     const isLoginSuccess = 
       !currentUrl.toLowerCase().includes('login') && 
       !currentUrl.toLowerCase().includes('signin') && 
-      !pageTitle.toLowerCase().includes('登录') && 
-      (pageContent.includes('欢迎') || pageContent.includes('Welcome') || pageContent.includes('退出') || pageContent.includes('Logout'));
+      !pageTitle.toLowerCase().includes('login') && 
+      (pageContent.includes('Welcome') || pageContent.includes('Logout') || pageContent.includes('Dashboard') || pageContent.includes('Home'));
 
     if (isLoginSuccess) {
-      const message = `*✅ 登录成功！*\n` +
-                     `📅 时间: ${new Date().toLocaleString('zh-CN', { hour12: false })}\n` +
-                     `🌐 页面: ${currentUrl}\n` +
-                     `📌 标题: ${pageTitle}`;
+      const message = `*✅ Login Successful!*\n` +
+                     `📅 Time: ${new Date().toLocaleString('en-US', { hour12: false })}\n` +
+                     `🌐 URL: ${currentUrl}\n` +
+                     `📌 Title: ${pageTitle}`;
       await sendTelegramMessage(process.env.TELEGRAM_BOT_TOKEN, process.env.TELEGRAM_CHAT_ID, message);
-      console.log('登录成功！当前页面：', currentUrl);
+      console.log('Login successful! Current URL:', currentUrl);
     } else {
-      throw new Error(`登录失败：URL=${currentUrl}, 标题=${pageTitle}, 未检测到登录成功标识`);
+      throw new Error(`Login failed: URL=${currentUrl}, Title=${pageTitle}, No success indicator detected`);
     }
 
-    console.log('脚本执行完成，浏览器将在8秒后关闭...');
-    await randomDelay(8000);
+    await randomDelay(3000);
 
   } catch (error) {
     const timestamp = new Date().getTime();
     const screenshotPath = path.join(screenshotsDir, `login-failure-${timestamp}.png`);
     await page.screenshot({ path: screenshotPath, fullPage: true, type: 'png', quality: 90 });
     
-    const message = `*❌ 登录失败！*\n` +
-                   `📅 时间: ${new Date().toLocaleString('zh-CN', { hour12: false })}\n` +
-                   `⚠️  错误: ${error.message}\n` +
-                   `📸 截图: ${path.basename(screenshotPath)}`;
+    const message = `*❌ Login Failed!*\n` +
+                   `📅 Time: ${new Date().toLocaleString('en-US', { hour12: false })}\n` +
+                   `⚠️ Error: ${error.message}\n` +
+                   `📸 Screenshot: ${path.basename(screenshotPath)}`;
     await sendTelegramMessage(process.env.TELEGRAM_BOT_TOKEN, process.env.TELEGRAM_CHAT_ID, message);
     
-    console.error('登录失败：', error.message);
-    console.error(`截屏已保存为 ${screenshotPath}`);
+    console.error('Login failed:', error.message);
+    console.error(`Screenshot saved as ${screenshotPath}`);
     throw error;
   } finally {
     await browser.close();
@@ -204,7 +223,7 @@ async function login() {
 }
 
 process.on('unhandledRejection', (reason) => {
-  console.error('未处理的异常：', reason instanceof Error ? reason.message : reason);
+  console.error('Unhandled rejection:', reason instanceof Error ? reason.message : reason);
   process.exit(1);
 });
 
